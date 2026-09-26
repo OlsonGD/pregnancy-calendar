@@ -1,11 +1,12 @@
 /* ============================================================
  * storage.js —— 数据层 + 登录会话 + 权限
  *  - local 模式：localStorage（默认，无需任何账号）
- *  - cloud 模式：腾讯云开发 CloudBase（config.js 填入环境 ID 后
- *    自动启用）：匿名登录直读云数据库 + 云函数 app_write 写入，
- *    所有设备读写同一个云数据库
+ *  - cloud 模式：Supabase（config.js 填入 URL 与 anon key 后自动启用）
+ *      读取 = PostgREST 直读（RLS 允许公开读，无需登录即可加载）
+ *      写入 = 全部走 SECURITY DEFINER 函数 app_write（校验咕嘟密码哈希）
+ *    所有设备读写同一个云数据库，实现跨设备同步
  *  - 云模式带本地缓存镜像：断网时可读最近一次数据
- *  - 权限语义（客户端拦截 + 云端安全规则/云函数双重保障）：
+ *  - 权限语义（客户端拦截 + 服务端双重保障）：
  *      查看全部内容 = 亲友 / 咕嘟（亲友免密）
  *      提建议        = 亲友 / 咕嘟
  *      记录体重、编辑日历内容、管理建议、改设置 = 仅咕嘟
@@ -46,8 +47,7 @@ var Storage = (function () {
         var maxAge = CFG.SESSION_DAYS * 86400000;
         if (!s || !s.role || !CFG.USERS[s.role]) return false;
         if (Date.now() - s.ts > maxAge) { this.clear(); return false; }
-        /* 咕嘟会话必须带 key；亲友免密 key 为空 */
-        if (s.role === 'owner' && !s.key) return false;
+        if (s.role === 'owner' && !s.key) return false;  /* 咕嘟会话必须带 key */
         this.role = s.role;
         this.key = s.key || null;
         this.name = s.name || CFG.USERS[s.role].name;
@@ -90,6 +90,8 @@ var Storage = (function () {
   function sortByDate(a, b) { return a.date < b.date ? -1 : (a.date > b.date ? 1 : 0); }
   function sortByCreatedDesc(a, b) {
     var ta = a.created_at || 0, tb = b.created_at || 0;
+    if (typeof ta === 'string') ta = Date.parse(ta) || 0;
+    if (typeof tb === 'string') tb = Date.parse(tb) || 0;
     return tb - ta;
   }
 
@@ -105,7 +107,7 @@ var Storage = (function () {
       for (var i = 0; i < list.length; i++) if (list[i].date === w.date) found = list[i];
       var rec;
       if (found) {
-        found.kg = w.kg; found.note = w.note || ''; found.entered_by = 'owner'; found.updated_at = Date.now();
+        found.kg = w.kg; found.note = w.note || ''; found.entered_by = 'owner';
         rec = found;
       } else {
         rec = { id: genId(), date: w.date, kg: w.kg, note: w.note || '', entered_by: 'owner', created_at: Date.now() };
@@ -214,54 +216,58 @@ var Storage = (function () {
     }
   };
 
-  /* ================= 云端实现（腾讯云开发 CloudBase） ================= */
+  /* ================= 云端实现（Supabase） ================= */
   var Cloud = (function () {
-    var app = null;
-    var db = null;
-    var readyP = null;
+    function base() { return String(CFG.SUPABASE_URL).replace(/\/$/, ''); }
 
-    /* 初始化 SDK + 匿名登录（亲友免密的云端身份） */
-    function ensure() {
-      if (readyP) return readyP;
-      readyP = new Promise(function (resolve, reject) {
-        if (!window.cloudbase) {
-          reject(err('NO_SDK', '云开发 SDK 未加载（网络异常？）'));
-          return;
-        }
-        try {
-          app = window.cloudbase.init({ env: CFG.CLOUDBASE_ENV });
-          db = app.database();
-        } catch (e) {
-          reject(err('SDK_INIT', '云开发初始化失败，请检查环境 ID'));
-          return;
-        }
-        try {
-          var auth = app.auth({ persistence: 'local' });
-          var signIn = auth.signInAnonymously || (auth.anonymousAuthProvider && auth.anonymousAuthProvider().signIn);
-          if (typeof signIn === 'function') {
-            signIn.call(auth).then(function () { resolve(); }, function () {
-              resolve(); /* 已有匿名身份等情况，继续 */
-            });
-          } else {
-            resolve(); /* 无显式匿名登录接口：SDK 会自动使用匿名身份 */
-          }
-        } catch (e) { resolve(); }
-      });
-      return readyP;
+    function headers() {
+      return {
+        'apikey': CFG.SUPABASE_ANON_KEY,
+        'Authorization': 'Bearer ' + CFG.SUPABASE_ANON_KEY,
+        'Content-Type': 'application/json'
+      };
+    }
+
+    function mapError(status, e) {
+      if (status === 401 || status === 403) return err('FORBIDDEN', '没有权限（可能是密钥不一致，请检查设置）');
+      if (status === 404) return err('NO_TABLE', '云端数据表不存在：请先在 Supabase 执行 supabase-setup.sql');
+      if (status === 400 && e && /does not exist/i.test(e.message || '')) {
+        return err('NO_FUNC', '云端函数不存在：请先在 Supabase 执行 supabase-setup.sql');
+      }
+      if (e && e.code === '23505') return err('DUPLICATE', '记录已存在');
+      if (e && e.code === '42501') return err('FORBIDDEN', '没有权限：密钥不正确');
+      return err((e && e.code) || ('HTTP_' + status), (e && (e.message || e.hint)) || ('云端请求失败(' + status + ')'));
+    }
+
+    /* 读取：PostgREST 直读 */
+    function sbGet(path) {
+      return fetch(base() + '/rest/v1/' + path, { headers: headers() })
+        .then(function (res) {
+          if (res.ok) return res.json();
+          return res.json().catch(function () { return {}; }).then(function (e) { throw mapError(res.status, e); });
+        }, function () { throw err('NETWORK', '云端连接失败，请检查网络后重试'); });
+    }
+
+    /* 写入：统一走 SECURITY DEFINER 函数（密钥放在请求体，不触发 CORS 预检问题） */
+    function sbWrite(op, table, data) {
+      return fetch(base() + '/rest/v1/rpc/app_write', {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify({ p_key: Auth.key || '', p_op: op, p_table: table, p_data: data || {} })
+      }).then(function (res) {
+        if (res.ok) return res.json();
+        return res.json().catch(function () { return {}; }).then(function (e) { throw mapError(res.status, e); });
+      }, function () { throw err('NETWORK', '云端连接失败，请检查网络后重试'); });
     }
 
     function cacheSet(key, val) { lsSet(key, val); }
     function cacheGet(key) { return lsGet(key); }
 
-    /* 读集合：SDK 直读（安全规则「所有用户可读」）→ 本地缓存镜像 */
-    function readColl(name) {
-      return ensure().then(function () {
-        return db.collection(name).get().then(function (res) {
-          var arr = (res && res.data) || [];
-          Storage.offline = false;
-          cacheSet(CACHE_PREFIX + name, arr);
-          return arr;
-        });
+    function readColl(name, query) {
+      return sbGet(name + '?' + query).then(function (arr) {
+        Storage.offline = false;
+        cacheSet(CACHE_PREFIX + name, arr || []);
+        return arr || [];
       }, function (e) {
         var c = cacheGet(CACHE_PREFIX + name);
         Storage.offline = true;
@@ -270,80 +276,70 @@ var Storage = (function () {
       });
     }
 
-    /* 写操作：全部走云函数 app_write（云端校验咕嘟密钥） */
-    function callW(op, table, data, key) {
-      return ensure().then(function () {
-        return app.callFunction({
-          name: 'app_write',
-          data: { key: key || '', op: op, table: table, data: data || {} }
-        });
-      }).then(function (res) {
-        var r = (res && res.result) || {};
-        if (r && r.ok) return r;
-        throw err((r && r.code) || 'CLOUD', (r && r.msg) || '云端操作失败');
-      }, function (e) {
-        throw err('NETWORK', '云端连接失败，请检查网络后重试');
-      });
-    }
-
     return {
       listWeights: function () {
-        return readColl('weights').then(function (arr) { return arr.slice().sort(sortByDate); });
+        return readColl('weights', 'select=*&order=date.asc');
       },
       saveWeight: function (w) {
         var e = requireOwner(); if (e) return Promise.reject(e);
-        return callW('insert', 'weights', { date: w.date, kg: w.kg, note: w.note || '' }, Auth.key);
+        return sbWrite('insert', 'weights', { date: w.date, kg: w.kg, note: w.note || '' });
       },
       updateWeight: function (id, patch) {
         var e = requireOwner(); if (e) return Promise.reject(e);
-        return callW('update', 'weights', { id: id, kg: patch.kg, note: patch.note }, Auth.key);
+        return sbWrite('update', 'weights', { id: id, kg: patch.kg, note: patch.note });
       },
       deleteWeight: function (id) {
         var e = requireOwner(); if (e) return Promise.reject(e);
-        return callW('delete', 'weights', { id: id }, Auth.key);
+        return sbWrite('delete', 'weights', { id: id });
       },
       listEvents: function () {
-        return readColl('events').then(function (arr) { return arr.slice().sort(sortByDate); });
+        return readColl('events', 'select=*&order=date.asc');
       },
       addEvent: function (ev) {
         var e = requireOwner(); if (e) return Promise.reject(e);
-        return callW('insert', 'events', { date: ev.date, title: ev.title, detail: ev.detail || '', type: ev.type || 'event' }, Auth.key);
+        return sbWrite('insert', 'events', { date: ev.date, title: ev.title, detail: ev.detail || '', type: ev.type || 'event' });
       },
       updateEvent: function (id, patch) {
         var e = requireOwner(); if (e) return Promise.reject(e);
-        return callW('update', 'events', { id: id, title: patch.title, detail: patch.detail }, Auth.key);
+        return sbWrite('update', 'events', { id: id, title: patch.title, detail: patch.detail });
       },
       deleteEvent: function (id) {
         var e = requireOwner(); if (e) return Promise.reject(e);
-        return callW('delete', 'events', { id: id }, Auth.key);
+        return sbWrite('delete', 'events', { id: id });
       },
       listSuggestions: function () {
-        return readColl('suggestions').then(function (arr) { return arr.slice().sort(sortByCreatedDesc); });
+        return readColl('suggestions', 'select=*&order=created_at.desc');
       },
-      /* 亲友免密提建议：云函数不校验密钥，但标注身份 */
+      /* 亲友免密提建议：云端不校验密钥，但标注身份 */
       addSuggestion: function (s) {
         var e = requireLoggedIn(); if (e) return Promise.reject(e);
-        return callW('insert', 'suggestions', { date: s.date, content: s.content }, Auth.key || '');
+        return sbWrite('insert', 'suggestions', { date: s.date, content: s.content });
       },
       updateSuggestion: function (id, patch) {
         var e = requireOwner(); if (e) return Promise.reject(e);
-        return callW('update', 'suggestions', { id: id, status: patch.status }, Auth.key);
+        return sbWrite('update', 'suggestions', { id: id, status: patch.status });
       },
       deleteSuggestion: function (id) {
         var e = requireOwner(); if (e) return Promise.reject(e);
-        return callW('delete', 'suggestions', { id: id }, Auth.key);
+        return sbWrite('delete', 'suggestions', { id: id });
       },
       getSettings: function () {
-        return readColl('settings').then(function (arr) {
+        return sbGet('settings?select=key,value').then(function (arr) {
+          Storage.offline = false;
           var s = { lmp: CFG.DEFAULT_LMP, height: '', preweight: '' };
           (arr || []).forEach(function (kv) { if (kv && kv.key) s[kv.key] = kv.value; });
           lsSet(K_SETTINGS, s);
           return s;
+        }, function (e) {
+          var c = lsGet(K_SETTINGS);
+          Storage.offline = true;
+          if (Storage.onError) Storage.onError(err('OFFLINE', '当前离线，显示的是最近一次缓存数据'));
+          return c || { lmp: CFG.DEFAULT_LMP, height: '', preweight: '' };
         });
       },
       saveSettings: function (patch) {
         var e = requireOwner(); if (e) return Promise.reject(e);
-        return callW('settings', 'settings', patch, Auth.key);
+        return sbWrite('settings', 'settings', patch);
       }
     };
   })();
@@ -357,7 +353,7 @@ var Storage = (function () {
     onError: null,
 
     init: function () {
-      if (CFG.CLOUDBASE_ENV) {
+      if (CFG.SUPABASE_URL && CFG.SUPABASE_ANON_KEY) {
         impl = Cloud;
         api.mode = 'cloud';
       } else {
@@ -398,48 +394,44 @@ var Storage = (function () {
     importAll: function (obj) {
       var e = requireOwner(); if (e) return Promise.reject(e);
       if (!obj || obj.app !== 'pregnancy-calendar' || !obj.weights) return Promise.reject(err('BAD_FILE', '备份文件格式不正确'));
-      return impl.getSettings().then(function (cur) {
-        var patch = {};
-        if (obj.settings) {
-          if (obj.settings.lmp) patch.lmp = obj.settings.lmp;
-          if (obj.settings.height) patch.height = obj.settings.height;
-          if (obj.settings.preweight) patch.preweight = obj.settings.preweight;
-        }
-        var chain = Promise.resolve();
-        if (Object.keys(patch).length) chain = chain.then(function () { return impl.saveSettings(patch); });
-        (obj.weights || []).forEach(function (w) {
-          chain = chain.then(function () { return impl.saveWeight(w); });
-        });
-        var curEvents = null;
-        var curSugs = null;
-        return chain
-          .then(function () { return impl.listEvents(); })
-          .then(function (list) {
-            curEvents = {};
-            list.forEach(function (x) { curEvents[x.id] = true; });
-            var c2 = Promise.resolve();
-            (obj.events || []).forEach(function (ev) {
-              if (curEvents[ev.id]) return;
-              c2 = c2.then(function () {
-                return impl.addEvent({ date: ev.date, title: ev.title, detail: ev.detail, type: ev.type || 'event' });
-              });
-            });
-            return c2;
-          })
-          .then(function () { return impl.listSuggestions(); })
-          .then(function (list) {
-            curSugs = {};
-            list.forEach(function (x) { curSugs[x.id] = true; });
-            var c3 = Promise.resolve();
-            (obj.suggestions || []).forEach(function (s) {
-              if (curSugs[s.id]) return;
-              c3 = c3.then(function () {
-                return impl.addSuggestion({ date: s.date, content: s.content });
-              });
-            });
-            return c3;
-          });
+      var patch = {};
+      if (obj.settings) {
+        if (obj.settings.lmp) patch.lmp = obj.settings.lmp;
+        if (obj.settings.height) patch.height = obj.settings.height;
+        if (obj.settings.preweight) patch.preweight = obj.settings.preweight;
+      }
+      var chain = Promise.resolve();
+      if (Object.keys(patch).length) chain = chain.then(function () { return impl.saveSettings(patch); });
+      (obj.weights || []).forEach(function (w) {
+        chain = chain.then(function () { return impl.saveWeight(w); });
       });
+      var curEvents = {};
+      var curSugs = {};
+      return chain
+        .then(function () { return impl.listEvents(); })
+        .then(function (list) {
+          list.forEach(function (x) { curEvents[x.id] = true; });
+          var c2 = Promise.resolve();
+          (obj.events || []).forEach(function (ev) {
+            if (curEvents[ev.id]) return;
+            c2 = c2.then(function () {
+              return impl.addEvent({ date: ev.date, title: ev.title, detail: ev.detail, type: ev.type || 'event' });
+            });
+          });
+          return c2;
+        })
+        .then(function () { return impl.listSuggestions(); })
+        .then(function (list) {
+          list.forEach(function (x) { curSugs[x.id] = true; });
+          var c3 = Promise.resolve();
+          (obj.suggestions || []).forEach(function (s) {
+            if (curSugs[s.id]) return;
+            c3 = c3.then(function () {
+              return impl.addSuggestion({ date: s.date, content: s.content });
+            });
+          });
+          return c3;
+        });
     }
   };
 
