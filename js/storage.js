@@ -18,7 +18,8 @@ var Storage = (function () {
 
   var Auth = {
     role: null,          /* 'family' | 'owner' */
-    key: null,           /* 咕嘟密码的 SHA-256（云端写入凭证）；亲友为 null */
+    key: null,           /* 咕嘟密码原文（云端写入凭证，服务端比对其哈希）；亲友为 null。
+                            注意：这是明文密码，会随会话存在本机 localStorage 里。*/
     name: '',
     isOwner: function () { return this.role === 'owner'; },
     isLoggedIn: function () { return !!this.role; },
