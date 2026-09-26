@@ -1018,10 +1018,10 @@ var App = (function () {
     /* 云状态 */
     var cs = $('cloud-status');
     if (Storage.mode === 'cloud') {
-      cs.textContent = '云同步·腾讯云' + (Storage.offline ? '（当前离线，显示缓存）' : '（已连接）');
+      cs.textContent = '云同步' + (Storage.offline ? '（当前离线，显示缓存）' : '（已连接）');
       $('cloud-retry').classList.remove('hidden');
     } else {
-      cs.textContent = '本地模式（数据存本设备；配置腾讯云开发后可多设备同步，见 README）';
+      cs.textContent = '本地模式（数据存本设备；配置 Supabase 后可多设备同步，见 README）';
       $('cloud-retry').classList.add('hidden');
     }
 
