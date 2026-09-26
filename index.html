@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="format-detection" content="telephone=no">
+<title>孕期日历 · 咕嘟的孕期小日历</title>
+<link rel="stylesheet" href="css/style.css?v=1">
+</head>
+<body>
+
+<!-- ============ 登录页（未登录唯一可见） ============ -->
+<div id="login-view" class="login-view">
+  <div class="login-card">
+    <div class="login-emoji">🤰</div>
+    <div class="login-title">孕期日历</div>
+    <div class="login-sub">每一天，都清楚安心</div>
+
+    <div class="login-roles" id="login-roles">
+      <button type="button" class="role-btn" data-role="family">亲友（免密）</button>
+      <button type="button" class="role-btn" data-role="owner">咕嘟</button>
+    </div>
+
+    <input type="password" id="login-pwd" class="login-pwd" placeholder="请输入咕嘟的密码" autocomplete="current-password">
+    <div class="login-error" id="login-error"></div>
+    <button type="button" class="btn-primary btn-block" id="login-btn">进入</button>
+    <div class="login-hint">亲友免密：点「亲友」直接进入<br>咕嘟需输入密码</div>
+  </div>
+</div>
+
+<!-- ============ 主应用 ============ -->
+<div id="app-view" class="app-view hidden">
+
+  <header class="topbar">
+    <div class="topbar-title">🤰 孕期日历</div>
+    <div class="topbar-user">
+      <span id="user-name" class="user-name"></span>
+      <button type="button" id="logout-btn" class="btn-mini">退出</button>
+    </div>
+  </header>
+
+  <!-- 今日卡 -->
+  <section class="today-card" id="today-card">
+    <div class="today-main">
+      <div class="today-ga" id="today-ga"></div>
+      <div class="today-stage" id="today-stage"></div>
+    </div>
+    <div class="progress"><div class="progress-fill" id="progress-fill"></div></div>
+    <div class="today-meta">
+      <span id="today-date"></span>
+      <span id="today-edd"></span>
+      <span id="today-next-check"></span>
+    </div>
+    <div class="offline-banner hidden" id="offline-banner">⚠️ 当前离线，显示的是最近一次缓存数据</div>
+  </section>
+
+  <!-- ===== 日历视图 ===== -->
+  <section id="view-calendar" class="view">
+    <div class="cal-nav">
+      <button type="button" id="cal-prev" class="cal-nav-btn">‹</button>
+      <div class="cal-month-label" id="cal-month-label"></div>
+      <button type="button" id="cal-next" class="cal-nav-btn">›</button>
+    </div>
+    <div class="cal-weekdays">
+      <span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span>
+    </div>
+    <div class="cal-grid" id="cal-grid"></div>
+    <div class="cal-legend">
+      <span><i class="dot dot-weight"></i>体重</span>
+      <span><i class="dot dot-check"></i>产检</span>
+      <span><i class="dot dot-event"></i>事项</span>
+    </div>
+
+    <!-- 日期详情：手机端=底部弹层；桌面端=日历下方的内联区块 -->
+    <div id="detail-panel" class="detail-panel hidden">
+      <div class="detail-header">
+        <div class="detail-header-text">
+          <div class="detail-date" id="detail-date"></div>
+          <div class="detail-ga" id="detail-ga"></div>
+        </div>
+        <button type="button" id="detail-close" class="btn-mini">✕</button>
+      </div>
+      <div class="detail-body" id="detail-body"></div>
+    </div>
+    <div class="detail-mask hidden" id="detail-mask"></div>
+    <div id="detail-hint" class="detail-hint hidden">👆 点上方日历中的日期，查看当天的孕周、产检、饮食提醒</div>
+  </section>
+
+  <!-- ===== 体重视图 ===== -->
+  <section id="view-weight" class="view hidden">
+    <h2 class="view-title">体重记录</h2>
+    <div class="chart-card">
+      <div class="chart-wrap" id="chart-wrap"></div>
+      <div class="chart-note" id="chart-note"></div>
+    </div>
+    <div class="weight-form-wrap" id="weight-form-wrap"></div>
+    <h3 class="list-title">历史记录</h3>
+    <div class="weight-list" id="weight-list"></div>
+  </section>
+
+  <!-- ===== 建议视图 ===== -->
+  <section id="view-suggest" class="view hidden">
+    <h2 class="view-title">提建议</h2>
+    <div class="suggest-compose" id="suggest-compose"></div>
+    <h3 class="list-title" id="suggest-list-title"></h3>
+    <div class="suggest-list" id="suggest-list"></div>
+  </section>
+
+  <!-- ===== 设置视图 ===== -->
+  <section id="view-settings" class="view hidden">
+    <h2 class="view-title">设置</h2>
+
+    <div class="settings-group" id="settings-basic">
+      <h3 class="settings-title">基础信息（仅咕嘟可修改）</h3>
+      <label class="field">
+        <span>末次月经（LMP）</span>
+        <input type="date" id="set-lmp" disabled>
+      </label>
+      <label class="field">
+        <span>身高（cm）</span>
+        <input type="number" id="set-height" placeholder="如 160" min="100" max="220" step="0.5" inputmode="decimal" disabled>
+      </label>
+      <label class="field">
+        <span>孕前体重（kg）</span>
+        <input type="number" id="set-preweight" placeholder="如 55" min="30" max="150" step="0.1" inputmode="decimal" disabled>
+      </label>
+      <div class="bmi-info" id="bmi-info"></div>
+      <div class="bmi-table" id="bmi-table"></div>
+      <button type="button" class="btn-primary" id="set-basic-save" disabled>保存</button>
+    </div>
+
+    <div class="settings-group">
+      <h3 class="settings-title">账户</h3>
+      <div class="settings-row">
+        <span>当前身份</span><span id="settings-role"></span>
+      </div>
+      <button type="button" class="btn-ghost" id="logout-btn2">退出登录</button>
+    </div>
+
+    <div class="settings-group" id="settings-backup">
+      <h3 class="settings-title">数据备份（仅咕嘟）</h3>
+      <div class="settings-tip">建议每月导出一次备份，防止意外丢失。导入会与现有数据合并（同日体重以导入文件为准）。</div>
+      <button type="button" class="btn-ghost" id="export-btn">导出备份（JSON）</button>
+      <button type="button" class="btn-ghost" id="import-btn">导入备份</button>
+      <input type="file" id="import-file" accept=".json,application/json" class="hidden">
+    </div>
+
+    <div class="settings-group">
+      <h3 class="settings-title">云同步状态</h3>
+      <div class="settings-row"><span>存储模式</span><span id="cloud-status"></span></div>
+      <button type="button" class="btn-ghost hidden" id="cloud-retry">重新连接云端</button>
+    </div>
+
+    <div class="settings-group" id="settings-owner-tools">
+      <h3 class="settings-title">维护工具（仅咕嘟）</h3>
+      <button type="button" class="btn-ghost" id="selftest-btn">运行自检</button>
+      <div class="selftest-result" id="selftest-result"></div>
+      <details class="hash-gen">
+        <summary>密码哈希生成器（改密码用）</summary>
+        <div class="settings-tip">输入新密码，生成 SHA-256 哈希，粘贴到 js/config.js 的 USERS 里替换旧哈希，同时更新 Supabase 的 app_secrets 表。</div>
+        <label class="field"><span>新密码</span><input type="text" id="hash-input" placeholder="输入新密码"></label>
+        <div class="hash-output" id="hash-output"></div>
+      </details>
+    </div>
+
+    <div class="settings-group">
+      <h3 class="settings-title">内容来源与免责声明</h3>
+      <div class="sources-list" id="sources-list"></div>
+      <div class="disclaimer" id="disclaimer-text"></div>
+    </div>
+  </section>
+
+  <!-- 底部导航 -->
+  <nav class="tabbar">
+    <button type="button" class="tab active" data-tab="calendar">📅<span>日历</span></button>
+    <button type="button" class="tab" data-tab="weight">⚖️<span>体重</span></button>
+    <button type="button" class="tab" data-tab="suggest">💬<span>建议</span><i class="badge hidden" id="suggest-badge"></i></button>
+    <button type="button" class="tab" data-tab="settings">⚙️<span>设置</span></button>
+  </nav>
+</div>
+
+<!-- ============ 通用弹窗 ============ -->
+<div id="modal" class="modal hidden">
+  <div class="modal-card" id="modal-card"></div>
+</div>
+<div class="modal-mask hidden" id="modal-mask"></div>
+
+<!-- 轻提示 -->
+<div id="toast" class="toast hidden"></div>
+
+<!-- 腾讯云开发 Web SDK（官方 CDN，国内直连；仅云同步模式需要） -->
+<script src="https://static.cloudbase.net/cloudbase-js-sdk/2.17.3/cloudbase.full.js"></script>
+<script src="js/config.js?v=1"></script>
+<script src="js/sha256.js?v=1"></script>
+<script src="js/content.js?v=1"></script>
+<script src="js/calc.js?v=1"></script>
+<script src="js/storage.js?v=1"></script>
+<script src="js/chart.js?v=1"></script>
+<script src="js/app.js?v=1"></script>
+</body>
+</html>
