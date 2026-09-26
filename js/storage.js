@@ -237,9 +237,14 @@ var Storage = (function () {
         }
         try {
           var auth = app.auth({ persistence: 'local' });
-          auth.anonymousAuthProvider().signIn().then(function () { resolve(); }, function () {
-            resolve(); /* 已有匿名身份等情况，继续 */
-          });
+          var signIn = auth.signInAnonymously || (auth.anonymousAuthProvider && auth.anonymousAuthProvider().signIn);
+          if (typeof signIn === 'function') {
+            signIn.call(auth).then(function () { resolve(); }, function () {
+              resolve(); /* 已有匿名身份等情况，继续 */
+            });
+          } else {
+            resolve(); /* 无显式匿名登录接口：SDK 会自动使用匿名身份 */
+          }
         } catch (e) { resolve(); }
       });
       return readyP;
