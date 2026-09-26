@@ -11,7 +11,7 @@
  *    （微信缓存很顽固）。
  * ============================================================ */
 var CFG = {
-  VERSION: '3',
+  VERSION: '4',
 
   /* Supabase 项目地址，如 'https://abcdefgh.supabase.co'（结尾不带 /） */
   SUPABASE_URL: 'https://omxwrynaoasthcvjgknz.supabase.co',
@@ -23,7 +23,10 @@ var CFG = {
 
   /* 两个身份：
      - 亲友：免密登录（hash 留空），打开链接点「亲友」即进
-     - 咕嘟：需要密码，hash = 密码的 SHA-256（不存明文密码）
+     - 咕嘟：需要密码，hash = 密码的 SHA-256（前端用它做本地校验）
+     这个 hash 是公开的（本文件就是个公开的静态文件），所以它只用来
+     做前端提示，真正决定「能不能写」的是云函数 app_write：它会比对
+     密码原文的哈希。也就是说，光知道这个 hash 是写不进数据的。
      改咕嘟密码方法：设置页 → 密码哈希生成器 → 同时更新这里的
      hash 和 supabase-setup.sql 里的 v_owner_hash */
   USERS: {
