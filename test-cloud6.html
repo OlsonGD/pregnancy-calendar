@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>云连接深度诊断</title></head>
+<body>
+<pre id="out">诊断中…</pre>
+<script src="https://static.cloudbase.net/cloudbase-js-sdk/2.17.3/cloudbase.full.js"></script>
+<script src="js/config.js?v=2"></script>
+<script>
+var OUT = document.getElementById('out');
+function log(s) { OUT.textContent += '\n' + s; }
+function dump(e) {
+  if (e === null || e === undefined) return String(e);
+  var p = [];
+  try { p.push('str=' + String(e)); } catch (x) {}
+  try { if (e.message) p.push('msg=' + e.message); } catch (x) {}
+  try { if (e.code) p.push('code=' + e.code); } catch (x) {}
+  try { if (e.error_code) p.push('ecode=' + e.error_code); } catch (x) {}
+  try { if (e.requestId) p.push('req=' + e.requestId); } catch (x) {}
+  try { if (e.error_description) p.push('desc=' + e.error_description); } catch (x) {}
+  try { p.push('props=' + JSON.stringify(Object.getOwnPropertyNames(e).map(function (k) {
+    var v; try { v = String(e[k]).slice(0, 120); } catch (x) { v = '?'; }
+    return k + ':' + v;
+  }))); } catch (x) {}
+  return p.join(' | ');
+}
+setTimeout(function () {
+  var app = cloudbase.init({ env: CFG.CLOUDBASE_ENV });
+  var db = app.database();
+  var auth = app.auth({ persistence: 'local' });
+  /* ① 匿名登录 */
+  var signIn = auth.signInAnonymously || (auth.anonymousAuthProvider && auth.anonymousAuthProvider().signIn);
+  Promise.resolve(typeof signIn === 'function' ? signIn.call(auth) : null)
+    .then(function (r) {
+      log('① 匿名登录成功');
+      /* ② 读集合 */
+      return db.collection('weights').get().then(function (res) {
+        log('② 读取 weights 成功，条数=' + (res.data ? res.data.length : '?'));
+      }, function (e) {
+        log('② 读取 weights 失败 → ' + dump(e));
+      });
+    })
+    .then(function () {
+      /* ③ 调用云函数 */
+      return app.callFunction({ name: 'app_write', data: { key: '', op: 'insert', table: 'suggestions', data: { date: '2026-09-26', content: '【诊断】云函数通道测试' } } })
+        .then(function (r) { log('③ 云函数调用成功 → ' + JSON.stringify(r.result)); },
+              function (e) { log('③ 云函数调用失败 → ' + dump(e)); });
+    })
+    .then(function () {
+      /* ④ 再读一次 suggestions */
+      return db.collection('suggestions').get().then(function (res) {
+        log('④ 读取 suggestions 成功，条数=' + (res.data ? res.data.length : '?'));
+      }, function (e) { log('④ 读取 suggestions 失败 → ' + dump(e)); });
+    })
+    .then(function () { log('诊断结束'); })
+    .catch(function (e) { log('外层异常: ' + dump(e)); });
+}, 3000);
+</script>
+</body>
+</html>
