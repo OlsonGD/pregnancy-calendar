@@ -17,7 +17,7 @@ var CFG = {
   VERSION: '2',
 
   /* 腾讯云开发环境 ID，如 'yunqi-1a2b3c'（结尾不带空格）。留空 = 本地模式 */
-  CLOUDBASE_ENV: '',
+  CLOUDBASE_ENV: 'gudu-d0gvozze554d1f009',
 
   /* 末次月经第一天 */
   DEFAULT_LMP: '2026-08-03',
