@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>线上云同步验证</title></head>
+<body>
+<pre id="out">验证中…</pre>
+<script src="js/config.js?v=3"></script>
+<script src="js/sha256.js?v=3"></script>
+<script src="js/content.js?v=3"></script>
+<script src="js/calc.js?v=3"></script>
+<script src="js/storage.js?v=3"></script>
+<script>
+var OUT = document.getElementById('out');
+var lines = [];
+function log(s) { lines.push(s); OUT.textContent = lines.join('\n'); }
+function ok(name, cond, detail) { log((cond ? 'PASS ' : 'FAIL ') + name + (detail ? ' → ' + detail : '')); }
+
+setTimeout(function () {
+  Storage.init();
+  ok('① 云模式已启用', Storage.mode === 'cloud', '模式=' + Storage.mode);
+  ok('② 云端地址正确', CFG.SUPABASE_URL.indexOf('omxwrynaoasthcvjgknz') >= 0, CFG.SUPABASE_URL);
+
+  // 未登录不能读
+  Storage.listWeights().then(function () {
+    ok('③ 未登录读取应被拒绝', false, '却成功了');
+  }, function (e) {
+    ok('③ 未登录读取被拒绝', e.code === 'NOT_LOGIN', e.code);
+    return run();
+  }).catch(function (e) { log('异常: ' + (e && e.message)); done(); });
+
+  function run() {
+    // 亲友免密
+    Storage.Auth.login('family', null);
+    return Storage.listWeights().then(function (w) {
+      ok('④ 亲友免密可读云端数据', true, '当前 ' + w.length + ' 条体重');
+      return Storage.listSuggestions();
+    }).then(function (s) {
+      ok('⑤ 亲友可读建议列表', true, s.length + ' 条');
+      return Storage.listEvents();
+    }).then(function (ev) {
+      ok('⑥ 亲友可读日历事项', true, ev.length + ' 条');
+      // 咕嘟
+      Storage.Auth.login('owner', CFG.USERS.owner.hash);
+      return Storage.saveWeight({ date: '2026-09-26', kg: 56.3, note: '【验证】线上测试' });
+    }).then(function (w) {
+      ok('⑦ 咕嘟写入体重（走云端函数）', !!w, 'kg=' + (w && w.kg));
+      return Storage.listWeights();
+    }).then(function (list) {
+      var t = null;
+      list.forEach(function (x) { if (x.date === '2026-09-26') t = x; });
+      ok('⑧ 回读云端体重', !!t && Number(t.kg) === 56.3, t ? ('kg=' + t.kg + ' 记录人=' + t.entered_by) : '未找到');
+      if (!t) return null;
+      return Storage.deleteWeight(t.id).then(function () {
+        return Storage.listWeights();
+      }).then(function (after) {
+        var still = false;
+        after.forEach(function (x) { if (x.date === '2026-09-26') still = true; });
+        ok('⑨ 清理测试数据', !still);
+      });
+    }).then(function () {
+      Storage.Auth.clear();
+      done();
+    }).catch(function (e) {
+      log('异常: ' + ((e && (e.message || e.code)) || String(e)));
+      done();
+    });
+  }
+
+  function done() {
+    var fails = lines.filter(function (x) { return x.indexOf('FAIL') === 0; });
+    log('---');
+    log((lines.length - fails.length - 1) + ' 项通过, ' + fails.length + ' 项失败');
+    log('__DONE__');
+  }
+}, 1500);
+</script>
+</body>
+</html>
