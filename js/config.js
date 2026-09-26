@@ -14,9 +14,9 @@ var CFG = {
   VERSION: '3',
 
   /* Supabase 项目地址，如 'https://abcdefgh.supabase.co'（结尾不带 /） */
-  SUPABASE_URL: '',
+  SUPABASE_URL: 'https://omxwrynaoasthcvjgknz.supabase.co',
   /* Supabase 项目的 anon public key（不是 service_role key！） */
-  SUPABASE_ANON_KEY: '',
+  SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9teHdyeW5hb2FzdGhjdmpna256Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAzNjE0NzQsImV4cCI6MjEwNTkzNzQ3NH0.7Mt3gMLzv5jJnYA8bRhTzBmYlRjQZ2XQxlMQ2g9UK64',
 
   /* 末次月经第一天 */
   DEFAULT_LMP: '2026-08-03',
