@@ -114,7 +114,8 @@ var App = (function () {
         state.loginFails = 0;
         errEl.textContent = '';
         $('login-pwd').value = '';
-        Auth.login('owner', hex);
+        /* 凭证传「密码原文」而非哈希：哈希是公开的，服务端只认原文 */
+        Auth.login('owner', pwd);
         enterApp();
       } else {
         state.loginFails++;
