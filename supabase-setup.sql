@@ -68,18 +68,23 @@ create policy st_read on settings    for select using (true);
 -- SECURITY DEFINER 让函数以管理员身份执行，从而绕过 RLS 完成写入。
 -- 权限规则：
 --   · 提建议（suggestions insert）→ 任何人可做（亲友免密），身份自动标注
---   · 其余所有写操作           → 必须提供咕嘟密码哈希
+--   · 其余所有写操作           → 必须提供咕嘟密码（前端传密码原文，这里比对哈希）
+--
+-- 安全要点：p_key 必须是「密码原文」，绝不能改成直接比对 v_owner_hash。
+-- 因为 v_owner_hash 是公开的（同时出现在 js/config.js 和本文件里），
+-- 直接比对哈希 = 任何人读一眼源码就能拿到写权限 = 密码形同虚设。
+-- 比对原文的哈希，则攻击者必须真正知道密码，公开的哈希无法反推出原文。
 create or replace function app_write(p_key text, p_op text, p_table text, p_data jsonb)
 returns jsonb
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions   -- extensions: pgcrypto 的 digest() 在这里
 as $$
 declare
-  -- 咕嘟密码 leyuan 的 SHA-256（改密码时改这里）
+  -- 咕嘟密码的 SHA-256（改密码时改这里）
   v_owner_hash text := 'fe866bf72d97fb946453b3cd3db69eaa44da57a67b6bbc2ea5eaba01b00b1659';
-  v_owner boolean := (coalesce(p_key,'') <> '' and p_key = v_owner_hash);
-  v_by    text := case when coalesce(p_key,'') = v_owner_hash then 'owner' else 'family' end;
+  v_owner boolean := (coalesce(p_key,'') <> '' and encode(digest(p_key,'sha256'),'hex') = v_owner_hash);
+  v_by    text := case when v_owner then 'owner' else 'family' end;
   v_out   jsonb;
 begin
   -- ① 亲友免密：提交建议
