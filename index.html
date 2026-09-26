@@ -157,7 +157,7 @@
       <div class="selftest-result" id="selftest-result"></div>
       <details class="hash-gen">
         <summary>密码哈希生成器（改密码用）</summary>
-        <div class="settings-tip">输入新密码，生成 SHA-256 哈希，粘贴到 js/config.js 的 USERS 里替换旧哈希，同时更新云函数 app_write 里的 OWNER_HASH 并重新部署。</div>
+        <div class="settings-tip">输入新密码，生成 SHA-256 哈希，粘贴到 js/config.js 的 USERS 里替换旧哈希；同时到 Supabase 的 SQL Editor 执行一次更新语句（见 README 改密码章节）。</div>
         <label class="field"><span>新密码</span><input type="text" id="hash-input" placeholder="输入新密码"></label>
         <div class="hash-output" id="hash-output"></div>
       </details>
@@ -188,8 +188,6 @@
 <!-- 轻提示 -->
 <div id="toast" class="toast hidden"></div>
 
-<!-- 腾讯云开发 Web SDK（官方 CDN，国内直连；仅云同步模式需要） -->
-<script src="https://static.cloudbase.net/cloudbase-js-sdk/2.17.3/cloudbase.full.js"></script>
 <script src="js/config.js?v=2"></script>
 <script src="js/sha256.js?v=2"></script>
 <script src="js/content.js?v=2"></script>
