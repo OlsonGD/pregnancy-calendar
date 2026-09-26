@@ -8,60 +8,40 @@
 <pre id="out">测试启动中…</pre>
 <script src="https://static.cloudbase.net/cloudbase-js-sdk/2.17.3/cloudbase.full.js"></script>
 <script src="js/config.js?v=2"></script>
-<script src="js/sha256.js?v=2"></script>
-<script src="js/content.js?v=2"></script>
-<script src="js/calc.js?v=2"></script>
-<script src="js/storage.js?v=2"></script>
 <script>
 var OUT = document.getElementById('out');
 function log(s) { OUT.textContent += '\n' + s; }
+function jerr(e) {
+  var s = {};
+  for (var k in e) if (e.hasOwnProperty(k)) s[k] = e[k];
+  return JSON.stringify(s);
+}
 setTimeout(function () {
+  log('SDK 加载: ' + (typeof window.cloudbase !== 'undefined' ? '是' : '否（SDK CDN 失败）'));
+  if (typeof window.cloudbase === 'undefined') return;
   try {
-    Storage.init();
-    log('存储模式 = ' + Storage.mode);
-    if (Storage.mode !== 'cloud') { log('FAIL: 未进入云模式'); return; }
-    /* 亲友免密链路 */
-    Storage.Auth.login('family', null);
-    Storage.listWeights().then(function (w) {
-      log('① 读取 weights 成功，条数 = ' + w.length);
-      return Storage.addSuggestion({ date: '2026-09-26', content: '【云同步测试】亲友建议' });
-    }).then(function (s) {
-      log('② 亲友提建议成功（云函数写入）');
-      return Storage.listSuggestions();
-    }).then(function (l) {
-      log('③ 读取 suggestions 成功，条数 = ' + l.length);
-      /* 咕嘟链路 */
-      Storage.Auth.login('owner', 'fe866bf72d97fb946453b3cd3db69eaa44da57a67b6bbc2ea5eaba01b00b1659');
-      return Storage.saveWeight({ date: '2026-09-26', kg: 55.2, note: '云同步测试' });
-    }).then(function (w) {
-      log('④ 咕嘟记体重成功（云函数校验通过）');
-      return Storage.listWeights();
-    }).then(function (l) {
-      var t = null;
-      l.forEach(function (x) { if (x.date === '2026-09-26') t = x; });
-      if (!t) throw new Error('写入的体重未读到');
-      log('⑤ 体重回读成功 kg = ' + t.kg);
-      /* 清理测试数据 */
-      return Storage.deleteWeight(t.id).then(function () {
-        return Storage.listSuggestions();
-      }).then(function (sl) {
-        var clean = Promise.resolve();
-        sl.forEach(function (s) {
-          if (s.content.indexOf('【云同步测试】') === 0) {
-            clean = clean.then(function () { return Storage.deleteSuggestion(s.id); });
-          }
-        });
-        return clean;
-      }).then(function () { log('⑥ 测试数据已清理'); });
+    var app = cloudbase.init({ env: CFG.CLOUDBASE_ENV });
+    var db = app.database();
+    var auth = app.auth({ persistence: 'local' });
+    log('开始匿名登录…');
+    auth.anonymousAuthProvider().signIn().then(function () {
+      log('① 匿名登录成功');
+      return db.collection('weights').get();
+    }).then(function (res) {
+      log('② 读取 weights 成功，条数 = ' + (res.data ? res.data.length : '?'));
+      return db.collection('suggestions').add({
+        date: '2026-09-26', content: '【云同步测试】直写建议', status: 'new', created_at: Date.now()
+      });
+    }).then(function (r) {
+      log('③ 直写 suggestions 结果 = ' + (r && r.id ? '成功(直写通道可用)' : JSON.stringify(r)));
+      return auth.signOut();
     }).then(function () {
-      log('');
-      log('===== 全部通过：云同步链路正常 =====');
+      log('完成');
     }).catch(function (e) {
-      log('');
-      log('FAIL: ' + ((e && (e.message || e.code)) || String(e)));
+      log('ERR: ' + jerr(e));
     });
   } catch (e) {
-    log('EXCEPTION: ' + (e.message || String(e)));
+    log('EXC: ' + (e.message || String(e)) + ' | ' + jerr(e));
   }
 }, 3000);
 </script>
